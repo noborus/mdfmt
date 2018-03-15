@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shurcooL/markdownfmt/markdown"
+	"github.com/gomarkdown/mdfmt/markdown"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
