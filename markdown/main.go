@@ -3,6 +3,7 @@ package markdown
 
 import (
 	"bytes"
+	"go/format"
 	"io"
 	"io/ioutil"
 	"strings"
@@ -85,6 +86,13 @@ func (r *Renderer) cr(w io.Writer) {
 	}
 }
 
+func (r *Renderer) doubleSpace(w io.Writer) {
+	// TODO: need to remember number of written bytes
+	//if out.Len() > 0 {
+	r.outs(w, "\n")
+	//}
+}
+
 // RenderNode renders markdown node to cleaned-up markdown
 func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.WalkStatus {
 	if r.opts.RenderNodeHook != nil {
@@ -107,29 +115,26 @@ func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.Wal
 		r.strong(w, node)
 	case *ast.Del:
 		r.del(w, node)
+	case *ast.BlockQuote:
+		r.blockQuote(w, node)
+	case *ast.Link:
+		r.link(w, node)
+	case *ast.Image:
+		r.image(w, node)
+	case *ast.Code:
+		r.code(w, node)
+	case *ast.CodeBlock:
+		r.codeBlock(w, node)
+	case *ast.Document:
+		// do nothing
+	case *ast.Paragraph:
+		r.doParagraph(w, node)
+	case *ast.HTMLSpan:
+		r.htmlSpan(w, node)
+	case *ast.HTMLBlock:
+		r.htmlBlock(w, node)
 
 		/*
-			case *ast.BlockQuote:
-				r.outOneOfCr(w, entering, "<blockquote>", "</blockquote>")
-			case *ast.Link:
-				r.link(w, node, entering)
-			case *ast.Image:
-				if r.opts.Flags&SkipImages != 0 {
-					return ast.SkipChildren
-				}
-				r.image(w, node, entering)
-			case *ast.Code:
-				r.code(w, node)
-			case *ast.CodeBlock:
-				r.codeBlock(w, node)
-			case *ast.Document:
-				// do nothing
-			case *ast.Paragraph:
-				r.paragraph(w, node, entering)
-			case *ast.HTMLSpan:
-				r.span(w, node)
-			case *ast.HTMLBlock:
-				r.htmlBlock(w, node)
 			case *ast.Heading:
 				r.heading(w, node, entering)
 			case *ast.HorizontalRule:
@@ -154,6 +159,135 @@ func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.Wal
 	}
 
 	return ast.GoToNext
+}
+
+func (r *Renderer) htmlSpan(w io.Writer, node *ast.HTMLSpan) {
+	r.out(w, node.Literal)
+}
+
+func (r *Renderer) htmlBlock(w io.Writer, node *ast.HTMLBlock) {
+	r.doubleSpace(w)
+	r.out(w, node.Literal)
+	r.outs(w, "\n")
+}
+
+// TODO: rename to para()
+func (r *Renderer) doParagraph(w io.Writer, node *ast.Paragraph) {
+	// marker := out.Len()
+	r.doubleSpace(w)
+
+	r.paragraph[r.listDepth] = true
+
+	/*
+		if !text() {
+			out.Truncate(marker)
+			return
+		}
+	*/
+	r.outs(w, "\n")
+}
+
+// TODO: push this to caller to minimize dependencies
+func formatCode(lang string, text []byte) (formattedCode []byte, ok bool) {
+	switch lang {
+	case "Go", "go":
+		gofmt, err := format.Source(text)
+		if err != nil {
+			return nil, false
+		}
+		return gofmt, true
+	default:
+		return nil, false
+	}
+}
+
+func (r *Renderer) codeBlock(w io.Writer, node *ast.CodeBlock) {
+	r.doubleSpace(w)
+	text := node.Literal
+	lang := string(node.Info)
+	// Parse out the language name.
+	count := 0
+	for _, elt := range strings.Fields(lang) {
+		if elt[0] == '.' {
+			elt = elt[1:]
+		}
+		if len(elt) == 0 {
+			continue
+		}
+		r.outs(w, "```")
+		r.outs(w, elt)
+		count++
+		break
+	}
+
+	if count == 0 {
+		r.outs(w, "```")
+	}
+	r.outs(w, "\n")
+
+	if formattedCode, ok := formatCode(lang, text); ok {
+		r.out(w, formattedCode)
+	} else {
+		r.out(w, text)
+	}
+
+	r.outs(w, "```\n")
+}
+
+func (r *Renderer) code(w io.Writer, node *ast.Code) {
+	r.outs(w, "`")
+	r.out(w, node.Literal)
+	r.outs(w, "`")
+}
+
+func (r *Renderer) image(w io.Writer, node *ast.Image) {
+	link := node.Destination
+	title := node.Title
+	// alt := node. ??
+	var alt []byte
+	r.outs(w, "![")
+	r.out(w, alt)
+	r.outs(w, "](")
+	r.out(w, escape(link))
+	if len(title) != 0 {
+		r.outs(w, ` "`)
+		r.out(w, title)
+		r.outs(w, `"`)
+	}
+	r.outs(w, ")")
+}
+
+func (r *Renderer) link(w io.Writer, node *ast.Link) {
+	link := node.Destination
+	title := node.Title
+	content := node.Literal
+	r.outs(w, "[")
+	r.out(w, content)
+	r.outs(w, "](")
+	r.out(w, escape(link))
+	if len(title) != 0 {
+		r.outs(w, ` "`)
+		r.out(w, title)
+		r.outs(w, `"`)
+	}
+	r.outs(w, ")")
+}
+
+func (r *Renderer) blockQuote(w io.Writer, node *ast.BlockQuote) {
+	text := node.Literal
+	r.doubleSpace(w)
+	lines := bytes.Split(text, []byte("\n"))
+	for i, line := range lines {
+		if i == len(lines)-1 {
+			continue
+		}
+		r.outs(w, ">")
+		if len(line) != 0 {
+			r.outs(w, " ")
+			r.out(w, line)
+		}
+		r.outs(w, "\n")
+	}
 }
 
 func (r *Renderer) del(w io.Writer, node *ast.Del) {
@@ -236,75 +370,6 @@ func (*Renderer) RenderHeader(w io.Writer, ast ast.Node) {}
 func (*Renderer) RenderFooter(w io.Writer, ast ast.Node) {}
 
 /*
-func formatCode(lang string, text []byte) (formattedCode []byte, ok bool) {
-	switch lang {
-	case "Go", "go":
-		gofmt, err := format.Source(text)
-		if err != nil {
-			return nil, false
-		}
-		return gofmt, true
-	default:
-		return nil, false
-	}
-}
-
-// Block-level callbacks.
-func (_ *Renderer) BlockCode(out *bytes.Buffer, text []byte, lang string) {
-	doubleSpace(out)
-
-	// Parse out the language name.
-	count := 0
-	for _, elt := range strings.Fields(lang) {
-		if elt[0] == '.' {
-			elt = elt[1:]
-		}
-		if len(elt) == 0 {
-			continue
-		}
-		out.WriteString("```")
-		out.WriteString(elt)
-		count++
-		break
-	}
-
-	if count == 0 {
-		out.WriteString("```")
-	}
-	out.WriteString("\n")
-
-	if formattedCode, ok := formatCode(lang, text); ok {
-		out.Write(formattedCode)
-	} else {
-		out.Write(text)
-	}
-
-	out.WriteString("```\n")
-}
-
-// BlockQuote renders code block
-func (*Renderer) BlockQuote(out *bytes.Buffer, text []byte) {
-	doubleSpace(out)
-	lines := bytes.Split(text, []byte("\n"))
-	for i, line := range lines {
-		if i == len(lines)-1 {
-			continue
-		}
-		out.WriteString(">")
-		if len(line) != 0 {
-			out.WriteString(" ")
-			out.Write(line)
-		}
-		out.WriteString("\n")
-	}
-}
-
-// BlockHtml renders html block
-func (*Renderer) BlockHtml(out *bytes.Buffer, text []byte) {
-	doubleSpace(out)
-	out.Write(text)
-	out.WriteByte('\n')
-}
 
 // TitleBlock renderers title block
 func (*Renderer) TitleBlock(out *bytes.Buffer, text []byte) {
@@ -333,13 +398,13 @@ func (r *Renderer) Header(out *bytes.Buffer, text func() bool, level int, id str
 		len := r.stringWidth(out.String()[textMarker:])
 		fmt.Fprint(out, "\n", strings.Repeat("-", len))
 	}
-	out.WriteString("\n")
+	r.outs(w, "\n")
 }
 
 // HRule renders hrule
 func (*Renderer) HRule(out *bytes.Buffer) {
 	doubleSpace(out)
-	out.WriteString("---\n")
+	r.outs(w, "---\n")
 }
 
 // List renders a list
@@ -365,44 +430,31 @@ func (r *Renderer) ListItem(out *bytes.Buffer, text []byte, flags int) {
 		indentwriter.New(out, 1).Write(text)
 		r.orderedListCounter[r.listDepth]++
 	} else {
-		out.WriteString("-")
+		r.outs(w, "-")
 		indentwriter.New(out, 1).Write(text)
 	}
-	out.WriteString("\n")
+	r.outs(w, "\n")
 	if r.paragraph[r.listDepth] {
 		if flags&blackfriday.LIST_ITEM_END_OF_LIST == 0 {
-			out.WriteString("\n")
+			r.outs(w, "\n")
 		}
 		r.paragraph[r.listDepth] = false
 	}
 }
 
-// Paragraph renders a paragraph
-func (r *Renderer) Paragraph(out *bytes.Buffer, text func() bool) {
-	marker := out.Len()
-	doubleSpace(out)
-
-	r.paragraph[r.listDepth] = true
-
-	if !text() {
-		out.Truncate(marker)
-		return
-	}
-	out.WriteString("\n")
-}
 
 func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnData []int) {
 	doubleSpace(out)
 	for column, cell := range r.headers {
 		out.WriteByte('|')
 		out.WriteByte(' ')
-		out.WriteString(cell)
+		r.outs(w, cell)
 		for i := r.stringWidth(cell); i < r.columnWidths[column]; i++ {
 			out.WriteByte(' ')
 		}
 		out.WriteByte(' ')
 	}
-	out.WriteString("|\n")
+	r.outs(w, "|\n")
 	for column, width := range r.columnWidths {
 		out.WriteByte('|')
 		if r.columnAligns[column]&blackfriday.TABLE_ALIGNMENT_LEFT != 0 {
@@ -419,7 +471,7 @@ func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnDa
 			out.WriteByte('-')
 		}
 	}
-	out.WriteString("|\n")
+	r.outs(w, "|\n")
 	for i := 0; i < len(r.cells); {
 		for column := range r.headers {
 			cell := []byte(r.cells[i])
@@ -430,7 +482,7 @@ func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnDa
 			default:
 				fallthrough
 			case blackfriday.TABLE_ALIGNMENT_LEFT:
-				out.Write(cell)
+				r.out(w, cell)
 				for i := r.stringWidth(string(cell)); i < r.columnWidths[column]; i++ {
 					out.WriteByte(' ')
 				}
@@ -439,7 +491,7 @@ func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnDa
 				for i := 0; i < spaces/2; i++ {
 					out.WriteByte(' ')
 				}
-				out.Write(cell)
+				r.out(w, cell)
 				for i := 0; i < spaces-(spaces/2); i++ {
 					out.WriteByte(' ')
 				}
@@ -447,11 +499,11 @@ func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnDa
 				for i := r.stringWidth(string(cell)); i < r.columnWidths[column]; i++ {
 					out.WriteByte(' ')
 				}
-				out.Write(cell)
+				r.out(w, cell)
 			}
 			out.WriteByte(' ')
 		}
-		out.WriteString("|\n")
+		r.outs(w, "|\n")
 	}
 
 	r.headers = nil
@@ -477,60 +529,29 @@ func (r *Renderer) TableCell(out *bytes.Buffer, text []byte, align int) {
 }
 
 func (_ *Renderer) Footnotes(out *bytes.Buffer, text func() bool) {
-	out.WriteString("<Footnotes: Not implemented.>") // TODO
+	r.outs(w, "<Footnotes: Not implemented.>") // TODO
 }
 func (_ *Renderer) FootnoteItem(out *bytes.Buffer, name, text []byte, flags int) {
-	out.WriteString("<FootnoteItem: Not implemented.>") // TODO
+	r.outs(w, "<FootnoteItem: Not implemented.>") // TODO
 }
 
 // Span-level callbacks.
 func (_ *Renderer) AutoLink(out *bytes.Buffer, link []byte, kind int) {
-	out.Write(escape(link))
+	r.out(w, escape(link))
 }
-func (_ *Renderer) CodeSpan(out *bytes.Buffer, text []byte) {
-	out.WriteByte('`')
-	out.Write(text)
-	out.WriteByte('`')
-}
-func (_ *Renderer) Image(out *bytes.Buffer, link []byte, title []byte, alt []byte) {
-	out.WriteString("![")
-	out.Write(alt)
-	out.WriteString("](")
-	out.Write(escape(link))
-	if len(title) != 0 {
-		out.WriteString(` "`)
-		out.Write(title)
-		out.WriteString(`"`)
-	}
-	out.WriteString(")")
-}
-func (_ *Renderer) Link(out *bytes.Buffer, link []byte, title []byte, content []byte) {
-	out.WriteString("[")
-	out.Write(content)
-	out.WriteString("](")
-	out.Write(escape(link))
-	if len(title) != 0 {
-		out.WriteString(` "`)
-		out.Write(title)
-		out.WriteString(`"`)
-	}
-	out.WriteString(")")
-}
-func (_ *Renderer) RawHtmlTag(out *bytes.Buffer, tag []byte) {
-	out.Write(tag)
-}
+
 func (_ *Renderer) TripleEmphasis(out *bytes.Buffer, text []byte) {
-	out.WriteString("***")
-	out.Write(text)
-	out.WriteString("***")
+	r.outs(w, "***")
+	r.out(w, text)
+	r.outs(w, "***")
 }
 func (_ *Renderer) FootnoteRef(out *bytes.Buffer, ref []byte, id int) {
-	out.WriteString("<FootnoteRef: Not implemented.>") // TODO
+	r.outs(w, "<FootnoteRef: Not implemented.>") // TODO
 }
 
 // Low-level callbacks.
 func (_ *Renderer) Entity(out *bytes.Buffer, entity []byte) {
-	out.Write(entity)
+	r.out(w, entity)
 }
 
 func (_ *Renderer) GetFlags() int { return 0 }
@@ -552,12 +573,6 @@ func cleanWithoutTrim(s string) string {
 		}
 	}
 	return string(b)
-}
-
-func doubleSpace(out *bytes.Buffer) {
-	if out.Len() > 0 {
-		out.WriteByte('\n')
-	}
 }
 
 // escape replaces instances of backslash with escaped backslash in text.

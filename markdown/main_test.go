@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 
 	"github.com/gomarkdown/mdfmt/markdown"
@@ -473,6 +474,11 @@ text ` + "`" + `noformat` + "`" + `
 
 // TODO: Factor out.
 func diff(b1, b2 []byte) (data []byte, err error) {
+	// diff is not available on windows
+	if runtime.GOOS == "windows" {
+		return nil, nil
+	}
+
 	f1, err := ioutil.TempFile("", "markdownfmt")
 	if err != nil {
 		return
