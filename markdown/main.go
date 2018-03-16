@@ -26,9 +26,6 @@ type RenderNodeFunc func(w io.Writer, node ast.Node, entering bool) (ast.WalkSta
 
 // Options specifies options for formatting.
 type Options struct {
-	// Terminal specifies if ANSI escape codes are emitted for styling.
-	Terminal bool
-
 	// if set, called at the start of RenderNode(). Allows replacing
 	// rendering of some nodes
 	RenderNodeHook RenderNodeFunc
@@ -67,9 +64,6 @@ func NewRenderer(opts *Options) *Renderer {
 	}
 	if opts != nil {
 		r.opts = *opts
-	}
-	if r.opts.Terminal {
-		r.stringWidth = terminalStringWidth
 	}
 	return r
 }
@@ -481,15 +475,9 @@ func (r *Renderer) del(w io.Writer, node *ast.Del) {
 
 func (r *Renderer) strong(w io.Writer, node *ast.Strong) {
 	text := node.Literal
-	if r.opts.Terminal {
-		r.outs(w, "\x1b[1m") // bold
-	}
 	r.outs(w, "**")
 	r.out(w, text)
 	r.outs(w, "**")
-	if r.opts.Terminal {
-		r.outs(w, "\x1b[0m") // reset
-	}
 }
 
 func (r *Renderer) emphasis(w io.Writer, node *ast.Emph) {
@@ -610,15 +598,6 @@ func needsEscaping(text []byte, lastNormalText string) bool {
 	default:
 		return false
 	}
-}
-
-// terminalStringWidth returns width of s, taking into account possible ANSI escape codes
-// (which don't count towards string width).
-func terminalStringWidth(s string) (width int) {
-	width = runewidth.StringWidth(s)
-	width -= strings.Count(s, "\x1b[1m") * len("[1m") // HACK, TODO: Find a better way of doing this.
-	width -= strings.Count(s, "\x1b[0m") * len("[0m") // HACK, TODO: Find a better way of doing this.
-	return width
 }
 
 // Process formats Markdown.
