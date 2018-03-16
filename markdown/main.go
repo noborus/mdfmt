@@ -44,7 +44,7 @@ type Renderer struct {
 
 	// TODO: Clean these up.
 	headers       []string
-	columnAligns  []int
+	columnAligns  []ast.CellAlignFlags
 	columnWidths  []int
 	cells         []string
 	lastOutputLen int
@@ -145,24 +145,122 @@ func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.Wal
 		r.list(w, node)
 	case *ast.ListItem:
 		r.listItem(w, node)
-
-		/*
-			case *ast.Table:
-				r.outOneOfCr(w, entering, "<table>", "</table>")
-			case *ast.TableCell:
-				r.tableCell(w, node, entering)
-			case *ast.TableHead:
-				r.outOneOfCr(w, entering, "<thead>", "</thead>")
-			case *ast.TableBody:
-				r.tableBody(w, node, entering)
-			case *ast.TableRow:
-				r.outOneOfCr(w, entering, "<tr>", "</tr>")
-		*/
+	case *ast.TableRow:
+		// do nothing
+	case *ast.TableCell:
+		r.tableCell(w, node)
+	case *ast.TableHead:
+		// do nothing
+	case *ast.Table:
+		// do nothing
+	case *ast.TableBody:
+		r.tableBody(w, node)
 	default:
 		// panic(fmt.Sprintf("Unknown node %T", node))
 	}
 
 	return ast.GoToNext
+}
+
+func (r *Renderer) tableHeaderCell(w io.Writer, node *ast.TableCell) {
+	// out *bytes.Buffer, text []byte, align int) {
+	text := node.Literal
+	align := node.Align
+
+	r.columnAligns = append(r.columnAligns, align)
+	columnWidth := r.stringWidth(string(text))
+	r.columnWidths = append(r.columnWidths, columnWidth)
+	r.headers = append(r.headers, string(text))
+}
+
+func (r *Renderer) tableCell(w io.Writer, node *ast.TableCell) {
+	// out *bytes.Buffer, text []byte, align int) {
+	if node.IsHeader {
+		r.tableHeaderCell(w, node)
+		return
+	}
+
+	text := node.Literal
+	columnWidth := r.stringWidth(string(text))
+	column := len(r.cells) % len(r.headers)
+	if columnWidth > r.columnWidths[column] {
+		r.columnWidths[column] = columnWidth
+	}
+	r.cells = append(r.cells, string(text))
+}
+
+func (r *Renderer) tableBody(w io.Writer, node *ast.TableBody) {
+	// out *bytes.Buffer, header []byte, body []byte, columnData []int) {
+
+	r.doubleSpace(w)
+	// TODO:
+	/*
+		for column, cell := range r.headers {
+			out.WriteByte('|')
+			out.WriteByte(' ')
+			r.outs(w, cell)
+			for i := r.stringWidth(cell); i < r.columnWidths[column]; i++ {
+				out.WriteByte(' ')
+			}
+			out.WriteByte(' ')
+		}
+		r.outs(w, "|\n")
+		for column, width := range r.columnWidths {
+			out.WriteByte('|')
+			if r.columnAligns[column]&blackfriday.TABLE_ALIGNMENT_LEFT != 0 {
+				out.WriteByte(':')
+			} else {
+				out.WriteByte('-')
+			}
+			for ; width > 0; width-- {
+				out.WriteByte('-')
+			}
+			if r.columnAligns[column]&blackfriday.TABLE_ALIGNMENT_RIGHT != 0 {
+				out.WriteByte(':')
+			} else {
+				out.WriteByte('-')
+			}
+		}
+		r.outs(w, "|\n")
+		for i := 0; i < len(r.cells); {
+			for column := range r.headers {
+				cell := []byte(r.cells[i])
+				i++
+				out.WriteByte('|')
+				out.WriteByte(' ')
+				switch r.columnAligns[column] {
+				default:
+					fallthrough
+				case blackfriday.TABLE_ALIGNMENT_LEFT:
+					r.out(w, cell)
+					for i := r.stringWidth(string(cell)); i < r.columnWidths[column]; i++ {
+						out.WriteByte(' ')
+					}
+				case blackfriday.TABLE_ALIGNMENT_CENTER:
+					spaces := r.columnWidths[column] - r.stringWidth(string(cell))
+					for i := 0; i < spaces/2; i++ {
+						out.WriteByte(' ')
+					}
+					r.out(w, cell)
+					for i := 0; i < spaces-(spaces/2); i++ {
+						out.WriteByte(' ')
+					}
+				case blackfriday.TABLE_ALIGNMENT_RIGHT:
+					for i := r.stringWidth(string(cell)); i < r.columnWidths[column]; i++ {
+						out.WriteByte(' ')
+					}
+					r.out(w, cell)
+				}
+				out.WriteByte(' ')
+			}
+			r.outs(w, "|\n")
+		}
+
+		r.headers = nil
+		r.columnAligns = nil
+		r.columnWidths = nil
+		r.cells = nil
+	*/
 }
 
 func (r *Renderer) list(w io.Writer, node *ast.List) {
@@ -456,96 +554,7 @@ func (*Renderer) RenderFooter(w io.Writer, ast ast.Node) {}
 
 /*
 
-func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnData []int) {
-	doubleSpace(out)
-	for column, cell := range r.headers {
-		out.WriteByte('|')
-		out.WriteByte(' ')
-		r.outs(w, cell)
-		for i := r.stringWidth(cell); i < r.columnWidths[column]; i++ {
-			out.WriteByte(' ')
-		}
-		out.WriteByte(' ')
-	}
-	r.outs(w, "|\n")
-	for column, width := range r.columnWidths {
-		out.WriteByte('|')
-		if r.columnAligns[column]&blackfriday.TABLE_ALIGNMENT_LEFT != 0 {
-			out.WriteByte(':')
-		} else {
-			out.WriteByte('-')
-		}
-		for ; width > 0; width-- {
-			out.WriteByte('-')
-		}
-		if r.columnAligns[column]&blackfriday.TABLE_ALIGNMENT_RIGHT != 0 {
-			out.WriteByte(':')
-		} else {
-			out.WriteByte('-')
-		}
-	}
-	r.outs(w, "|\n")
-	for i := 0; i < len(r.cells); {
-		for column := range r.headers {
-			cell := []byte(r.cells[i])
-			i++
-			out.WriteByte('|')
-			out.WriteByte(' ')
-			switch r.columnAligns[column] {
-			default:
-				fallthrough
-			case blackfriday.TABLE_ALIGNMENT_LEFT:
-				r.out(w, cell)
-				for i := r.stringWidth(string(cell)); i < r.columnWidths[column]; i++ {
-					out.WriteByte(' ')
-				}
-			case blackfriday.TABLE_ALIGNMENT_CENTER:
-				spaces := r.columnWidths[column] - r.stringWidth(string(cell))
-				for i := 0; i < spaces/2; i++ {
-					out.WriteByte(' ')
-				}
-				r.out(w, cell)
-				for i := 0; i < spaces-(spaces/2); i++ {
-					out.WriteByte(' ')
-				}
-			case blackfriday.TABLE_ALIGNMENT_RIGHT:
-				for i := r.stringWidth(string(cell)); i < r.columnWidths[column]; i++ {
-					out.WriteByte(' ')
-				}
-				r.out(w, cell)
-			}
-			out.WriteByte(' ')
-		}
-		r.outs(w, "|\n")
-	}
-
-	r.headers = nil
-	r.columnAligns = nil
-	r.columnWidths = nil
-	r.cells = nil
-}
-func (_ *Renderer) TableRow(out *bytes.Buffer, text []byte) {
-}
-func (r *Renderer) TableHeaderCell(out *bytes.Buffer, text []byte, align int) {
-	r.columnAligns = append(r.columnAligns, align)
-	columnWidth := r.stringWidth(string(text))
-	r.columnWidths = append(r.columnWidths, columnWidth)
-	r.headers = append(r.headers, string(text))
-}
-func (r *Renderer) TableCell(out *bytes.Buffer, text []byte, align int) {
-	columnWidth := r.stringWidth(string(text))
-	column := len(r.cells) % len(r.headers)
-	if columnWidth > r.columnWidths[column] {
-		r.columnWidths[column] = columnWidth
-	}
-	r.cells = append(r.cells, string(text))
-}
-
-// Span-level callbacks.
-func (_ *Renderer) AutoLink(out *bytes.Buffer, link []byte, kind int) {
-	r.out(w, escape(link))
-}
-*/
+ */
 
 // cleanWithoutTrim is like clean, but doesn't trim blanks.
 func cleanWithoutTrim(s string) string {
