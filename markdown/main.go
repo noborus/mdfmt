@@ -3,6 +3,7 @@ package markdown
 
 import (
 	"bytes"
+	"fmt"
 	"go/format"
 	"io"
 	"io/ioutil"
@@ -12,7 +13,10 @@ import (
 	"github.com/gomarkdown/markdown/ast"
 	"github.com/gomarkdown/markdown/parser"
 	"github.com/mattn/go-runewidth"
+	"github.com/shurcooL/go/indentwriter"
 )
+
+// TODO: copy indentwriter locally to minimize dependencies
 
 // RenderNodeFunc allows reusing most of Renderer logic and replacing
 // rendering of some nodes. If it returns false, Renderer.RenderNode
@@ -133,16 +137,16 @@ func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.Wal
 		r.htmlSpan(w, node)
 	case *ast.HTMLBlock:
 		r.htmlBlock(w, node)
+	case *ast.Heading:
+		r.heading(w, node)
+	case *ast.HorizontalRule:
+		r.horizontalRule(w)
+	case *ast.List:
+		r.list(w, node)
+	case *ast.ListItem:
+		r.listItem(w, node)
 
 		/*
-			case *ast.Heading:
-				r.heading(w, node, entering)
-			case *ast.HorizontalRule:
-				r.horizontalRule(w)
-			case *ast.List:
-				r.list(w, node, entering)
-			case *ast.ListItem:
-				r.listItem(w, node, entering)
 			case *ast.Table:
 				r.outOneOfCr(w, entering, "<table>", "</table>")
 			case *ast.TableCell:
@@ -159,6 +163,87 @@ func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.Wal
 	}
 
 	return ast.GoToNext
+}
+
+func (r *Renderer) list(w io.Writer, node *ast.List) {
+	flags := node.ListFlags
+	// TODO:
+	// marker := out.Len()
+	r.doubleSpace(w)
+
+	r.listDepth++
+	defer func() { r.listDepth-- }()
+	if flags&ast.ListTypeOrdered != 0 {
+		r.orderedListCounter[r.listDepth] = 1
+	}
+	// TODO:
+	/*
+		if !text() {
+			out.Truncate(marker)
+			return
+		}
+	*/
+}
+
+func (r *Renderer) listItem(w io.Writer, node *ast.ListItem) {
+	// out *bytes.Buffer, text []byte, flags int) {
+	flags := node.ListFlags
+	text := node.Literal
+
+	if flags&ast.ListTypeOrdered != 0 {
+		fmt.Fprintf(w, "%d.", r.orderedListCounter[r.listDepth])
+		indentwriter.New(w, 1).Write(text)
+		r.orderedListCounter[r.listDepth]++
+	} else {
+		r.outs(w, "-")
+		indentwriter.New(w, 1).Write(text)
+	}
+	r.outs(w, "\n")
+	if r.paragraph[r.listDepth] {
+		if flags&ast.ListItemEndOfList == 0 {
+			r.outs(w, "\n")
+		}
+		r.paragraph[r.listDepth] = false
+	}
+}
+
+func (r *Renderer) horizontalRule(w io.Writer) {
+	r.doubleSpace(w)
+	r.outs(w, "---\n")
+}
+
+func (r *Renderer) heading(w io.Writer, node *ast.Heading) {
+	// TODO:
+	//marker := out.Len()
+	r.doubleSpace(w)
+
+	level := node.Level
+
+	if level >= 3 {
+		s := strings.Repeat("#", level) + " "
+		r.outs(w, s)
+	}
+
+	// TODO:
+	/*
+		textMarker := out.Len()
+		if !text() {
+			out.Truncate(marker)
+			return
+		}*/
+
+	// TODO: need to handle this
+	/*
+		switch level {
+		case 1:
+			len := r.stringWidth(out.String()[textMarker:])
+			fmt.Fprint(out, "\n", strings.Repeat("=", len))
+		case 2:
+			len := r.stringWidth(out.String()[textMarker:])
+			fmt.Fprint(out, "\n", strings.Repeat("-", len))
+		}
+		r.outs(w, "\n")
+	*/
 }
 
 func (r *Renderer) htmlSpan(w io.Writer, node *ast.HTMLSpan) {
@@ -371,78 +456,6 @@ func (*Renderer) RenderFooter(w io.Writer, ast ast.Node) {}
 
 /*
 
-// TitleBlock renderers title block
-func (*Renderer) TitleBlock(out *bytes.Buffer, text []byte) {
-}
-
-// Header renders a header
-func (r *Renderer) Header(out *bytes.Buffer, text func() bool, level int, id string) {
-	marker := out.Len()
-	doubleSpace(out)
-
-	if level >= 3 {
-		fmt.Fprint(out, strings.Repeat("#", level), " ")
-	}
-
-	textMarker := out.Len()
-	if !text() {
-		out.Truncate(marker)
-		return
-	}
-
-	switch level {
-	case 1:
-		len := r.stringWidth(out.String()[textMarker:])
-		fmt.Fprint(out, "\n", strings.Repeat("=", len))
-	case 2:
-		len := r.stringWidth(out.String()[textMarker:])
-		fmt.Fprint(out, "\n", strings.Repeat("-", len))
-	}
-	r.outs(w, "\n")
-}
-
-// HRule renders hrule
-func (*Renderer) HRule(out *bytes.Buffer) {
-	doubleSpace(out)
-	r.outs(w, "---\n")
-}
-
-// List renders a list
-func (r *Renderer) List(out *bytes.Buffer, text func() bool, flags int) {
-	marker := out.Len()
-	doubleSpace(out)
-
-	r.listDepth++
-	defer func() { r.listDepth-- }()
-	if flags&blackfriday.LIST_TYPE_ORDERED != 0 {
-		r.orderedListCounter[r.listDepth] = 1
-	}
-	if !text() {
-		out.Truncate(marker)
-		return
-	}
-}
-
-// ListItem renders a list itme
-func (r *Renderer) ListItem(out *bytes.Buffer, text []byte, flags int) {
-	if flags&ast.ListTypeOrdered != 0 {
-		fmt.Fprintf(out, "%d.", r.orderedListCounter[r.listDepth])
-		indentwriter.New(out, 1).Write(text)
-		r.orderedListCounter[r.listDepth]++
-	} else {
-		r.outs(w, "-")
-		indentwriter.New(out, 1).Write(text)
-	}
-	r.outs(w, "\n")
-	if r.paragraph[r.listDepth] {
-		if flags&blackfriday.LIST_ITEM_END_OF_LIST == 0 {
-			r.outs(w, "\n")
-		}
-		r.paragraph[r.listDepth] = false
-	}
-}
-
-
 func (r *Renderer) Table(out *bytes.Buffer, header []byte, body []byte, columnData []int) {
 	doubleSpace(out)
 	for column, cell := range r.headers {
@@ -528,34 +541,10 @@ func (r *Renderer) TableCell(out *bytes.Buffer, text []byte, align int) {
 	r.cells = append(r.cells, string(text))
 }
 
-func (_ *Renderer) Footnotes(out *bytes.Buffer, text func() bool) {
-	r.outs(w, "<Footnotes: Not implemented.>") // TODO
-}
-func (_ *Renderer) FootnoteItem(out *bytes.Buffer, name, text []byte, flags int) {
-	r.outs(w, "<FootnoteItem: Not implemented.>") // TODO
-}
-
 // Span-level callbacks.
 func (_ *Renderer) AutoLink(out *bytes.Buffer, link []byte, kind int) {
 	r.out(w, escape(link))
 }
-
-func (_ *Renderer) TripleEmphasis(out *bytes.Buffer, text []byte) {
-	r.outs(w, "***")
-	r.out(w, text)
-	r.outs(w, "***")
-}
-func (_ *Renderer) FootnoteRef(out *bytes.Buffer, ref []byte, id int) {
-	r.outs(w, "<FootnoteRef: Not implemented.>") // TODO
-}
-
-// Low-level callbacks.
-func (_ *Renderer) Entity(out *bytes.Buffer, entity []byte) {
-	r.out(w, entity)
-}
-
-func (_ *Renderer) GetFlags() int { return 0 }
-
 */
 
 // cleanWithoutTrim is like clean, but doesn't trim blanks.
