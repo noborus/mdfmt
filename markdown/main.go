@@ -143,7 +143,7 @@ func (r *Renderer) RenderNode(w io.Writer, node ast.Node, entering bool) ast.Wal
 		// do nothing
 	case *ast.TableCell:
 		r.tableCell(w, node)
-	case *ast.TableHead:
+	case *ast.TableHeader:
 		// do nothing
 	case *ast.Table:
 		// do nothing
